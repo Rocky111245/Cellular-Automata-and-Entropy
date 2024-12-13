@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Cellular Automata Visualization</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f4f4f9;
+        color: #333;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .controls-container {
+        padding: 20px;
+        background: #ffffff;
+        box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .controls-content {
+        max-width: 800px;
+        margin: 0 auto;
+        text-align: center;
+      }
+
+      h1 {
+        font-size: 24px;
+        margin-bottom: 20px;
+        color: #444;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+
+      .input-group {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+      }
+
+      label {
+        font-size: 14px;
+        color: #555;
+      }
+
+      input[type="number"], input[type="range"] {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        font-size: 14px;
+      }
+
+      button {
+        padding: 10px 20px;
+        font-size: 14px;
+        font-weight: bold;
+        color: white;
+        background-color: #4CAF50;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.3s ease;
+        grid-column: 1 / -1;
+        width: 200px;
+        margin: 0 auto;
+      }
+
+      button:hover {
+        background-color: #45a049;
+      }
+
+      .spinner {
+        height: 30px;
+        width: 30px;
+        margin: 20px auto;
+        display: none;
+        border-left: 5px solid rgba(235, 235, 235, 0.5);
+        border-right: 5px solid rgba(235, 235, 235, 0.5);
+        border-bottom: 5px solid rgba(235, 235, 235, 0.5);
+        border-top: 5px solid #4CAF50;
+        border-radius: 100%;
+        animation: rotation 0.8s linear infinite;
+      }
+
+      @keyframes rotation {
+        from {transform: rotate(0deg);}
+        to {transform: rotate(360deg);}
+      }
+
+      .status {
+        font-size: 14px;
+        color: #666;
+        margin-top: 10px;
+      }
+
+      /* Terminal Output Styles */
+      .terminal-container {
+        flex-grow: 1;
+        background: black;
+        padding: 20px;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #output {
+        width: 100%;
+        height: 100%;
+        padding: 10px;
+        margin: 0;
+        font-family: 'Courier New', monospace;
+        font-size: 14px;
+        line-height: 1.2;
+        color: white;
+        background-color: black;
+        border: none;
+        resize: none;
+        overflow-y: auto;
+        flex-grow: 1;
+      }
+
+      #output:focus {
+        outline: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="controls-container">
+      <div class="controls-content">
+        <h1>Cellular Automata Visualization</h1>
+        
+        <div class="controls">
+          <div class="input-group">
+            <label for="size">Grid Size (min: 20):</label>
+            <input type="number" id="size" value="50" min="20" max="200">
+          </div>
+          
+          <div class="input-group">
+            <label for="rule">Rule Number (0-255):</label>
+            <input type="number" id="rule" value="30" min="0" max="255">
+          </div>
+
+          <div class="input-group">
+            <label for="iterations">Number of Iterations:</label>
+            <input type="number" id="iterations" value="100" min="1" max="1000">
+          </div>
+
+          <div class="input-group">
+            <label for="fontSize">Font Size:</label>
+            <input type="range" id="fontSize" min="10" max="20" value="14" step="1" oninput="adjustFontSize(this.value)">
+          </div>
+          
+          <button onclick="runAutomaton()">Run Automaton</button>
+        </div>
+
+        <div class="spinner" id="spinner"></div>
+        <div class="status" id="status">Downloading...</div>
+      </div>
+    </div>
+
+    <div class="terminal-container">
+      <textarea id="output" readonly></textarea>
+    </div>
+
+    <script type='text/javascript'>
+      var statusElement = document.getElementById('status');
+      var spinnerElement = document.getElementById('spinner');
+      var outputElement = document.getElementById('output');
+
+      var Module = {
+        print: (function() {
+          return function(text) {
+            if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
+            if (outputElement) {
+              outputElement.value += text + "\n";
+              outputElement.scrollTop = outputElement.scrollHeight;
+            }
+          };
+        })(),
+        canvas: null,
+        setStatus: function(text) {
+          if (!Module.setStatus.last) Module.setStatus.last = { time: Date.now(), text: '' };
+          if (text === Module.setStatus.last.text) return;
+          var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
+          var now = Date.now();
+          if (m && now - Module.setStatus.last.time < 30) return;
+          Module.setStatus.last.time = now;
+          Module.setStatus.last.text = text;
+          if (statusElement) statusElement.innerHTML = text;
+          if (!text && spinnerElement) spinnerElement.style.display = 'none';
+        },
+        totalDependencies: 0,
+        monitorRunDependencies: function(left) {
+          this.totalDependencies = Math.max(this.totalDependencies, left);
+          Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies-left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
+        }
+      };
+
+      Module.setStatus('Downloading...');
+
+      function runAutomaton() {
+        var size = parseInt(document.getElementById('size').value);
+        var rule = parseInt(document.getElementById('rule').value);
+        var iterations = parseInt(document.getElementById('iterations').value);
+
+        if (isNaN(size) || size < 20) {
+          alert('Grid size must be at least 20');
+          return;
+        }
+
+        if (isNaN(rule) || rule < 0 || rule > 255) {
+          alert('Rule must be between 0 and 255');
+          return;
+        }
+
+        if (isNaN(iterations) || iterations < 1) {
+          alert('Number of iterations must be at least 1');
+          return;
+        }
+
+        outputElement.value = ''; // Clear previous output
+
+        if (Module._run_automaton) {
+          try {
+            Module._run_automaton(size, rule, iterations);
+          } catch (e) {
+            outputElement.value += 'Error: ' + e.message + '\n';
+          }
+        } else {
+          outputElement.value += 'WebAssembly module not loaded yet. Please wait...\n';
+        }
+      }
+
+      function adjustFontSize(fontSize) {
+        outputElement.style.fontSize = fontSize + 'px';
+      }
+    </script>
+    <script async type="text/javascript" src="Cellular_Automata.js"></script>
+  </body>
+</html>
